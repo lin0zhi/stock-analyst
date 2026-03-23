@@ -1,5 +1,5 @@
 openai
 yfinance
 pandas
-duckduckgo_search
+ddgs
 requests

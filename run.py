@@ -6,7 +6,6 @@ from email.header import Header
 from datetime import datetime, timedelta
 import pandas as pd
 import yfinance as yf
-from duckduckgo_search import DDGS
 from openai import OpenAI
 import json
 
@@ -18,9 +17,6 @@ MY_PORTFOLIO = [
     "002624.SZ", # 完美世界
     "600183.SS", # 生益科技
     "601318.SS", # 中国平安
-    # "000001.SZ", # 平安银行
-    # "002594.SZ", # 比亚迪
-    # "600900.SS"  # 长江电力
 ]
 
 MARKET_INDICES = {
@@ -67,56 +63,52 @@ def get_market_data():
     return "\n".join(data_summary)
 
 # --- 2. 获取新闻 ---
-def get_latest_news():
+def get_latest_news(client):
     news_items = []
     
-    with DDGS() as ddgs:
-        # 1. 宏观/综合金融新闻
-        print("正在搜索全球及A股宏观财经新闻...")
-        try:
-            # 搜索关键词：A股 上证指数 以及宏观市场
-            keywords = "今日A股行情 上证指数 宏观经济新闻 财经头条"
-            results = ddgs.text(keywords, max_results=5, timelimit='d')
-            for r in results:
-                news_items.append(f"[宏观] {r['title']} - {r['body'][:100]}...")
-        except Exception as e:
-            print(f"搜索宏观新闻出错: {e}")
+    # 1. 宏观/综合金融新闻
+    print("正在使用千问大模型联网获取宏观财经新闻...")
+    try:
+        macro_prompt = "请联网搜索并列出过去24小时全球及A股市场最重要的10条财经新闻，简要总结每条新闻的核心内容。请确保新闻的时效性。"
+        response = client.chat.completions.create(
+            model="qwen-plus", # 使用通义千问模型
+            messages=[
+                {"role": "system", "content": "你是一名具有联网搜索能力的财经助手。请确保提供的新闻是过去24小时内发生的真实新闻。"},
+                {"role": "user", "content": macro_prompt}
+            ],
+            extra_body={"enable_search": True} # 开启联网搜索
+        )
+        macro_news = response.choices[0].message.content
+        news_items.append(f"### 宏观财经新闻\n{macro_news}\n")
+    except Exception as e:
+        print(f"获取宏观新闻出错: {e}")
+        news_items.append("无法获取宏观新闻。")
 
-        # 2. 个股新闻 (针对 MY_PORTFOLIO)
-        print(f"正在逐个搜索 {len(MY_PORTFOLIO)} 只持仓股票的相关新闻...")
-        for stock_code in MY_PORTFOLIO:
-            try:
-                # 提取股票代码数字部分用于搜索，可能更准确 (如 600519)
-                code_srch = stock_code
-                if '.' in stock_code:
-                    code_srch = stock_code.split('.')[0]
-                
-                kw_list = [f"股票 {code_srch} 最新新闻 公告", f"{code_srch} 公司动态"]
-                found_news = False
-                
-                # 简单重试机制: 尝试 2 个关键词
-                for kw in kw_list:
-                    stock_res = ddgs.text(kw, max_results=2, timelimit='d')
-                    if stock_res:
-                        for r in stock_res:
-                            # 简单去重
-                            title_snip = r['title'][:20]
-                            if not any(title_snip in n for n in news_items):
-                                news_items.append(f"[{stock_code}] {r['title']} - {r['body'][:100]}...")
-                        found_news = True
-                        break # 只要找到新闻就跳过下一个关键词
-                
-                if not found_news:
-                    news_items.append(f"[{stock_code}] 暂无重大新闻")
-            except Exception as e:
-                print(f"搜索 {stock_code} 新闻出错: {e}")
-                news_items.append(f"[{stock_code}] 搜索异常")
+    # 2. 个股新闻 (针对 MY_PORTFOLIO)
+    print(f"正在逐个获取 {len(MY_PORTFOLIO)} 只持仓股票的相关新闻...")
+    for stock_code in MY_PORTFOLIO:
+        try:
+            # 提取股票代码或名称
+            stock_prompt = f"请联网搜索 {stock_code} (及相关上市公司) 近期（过去3天）最重要的新闻，简要总结利好或利空消息。如果没有重大新闻，请简要说明。"
+            response = client.chat.completions.create(
+                model="qwen-plus",
+                messages=[
+                    {"role": "system", "content": "你是一名具有联网搜索能力的个股分析助手。"},
+                    {"role": "user", "content": stock_prompt}
+                ],
+                extra_body={"enable_search": True} # 开启联网搜索
+            )
+            stock_news = response.choices[0].message.content
+            news_items.append(f"### {stock_code} 个股新闻\n{stock_news}\n")
+        except Exception as e:
+            print(f"获取 {stock_code} 新闻出错: {e}")
+            news_items.append(f"### {stock_code} 新闻\n获取失败: {str(e)}\n")
     
-    return "\n".join(news_items) if news_items else "未找到相关新闻。"
+    return "\n".join(news_items)
 
 # --- 3. AI 分析 ---
 def analyze_market(client, market_data_str, news_str):
-    print("正在请求 DeepSeek 进行综合分析...")
+    print("正在请求千问大模型进行综合分析...")
     
     prompt = f"""
     你是一名资深的 A 股与全球市场分析师。请根据以下提供的【市场数据】和【最新新闻】，对我的主要 A 股持仓进行深度复盘与展望。
@@ -147,11 +139,16 @@ def analyze_market(client, market_data_str, news_str):
 
     try:
         response = client.chat.completions.create(
-            model="deepseek-chat",
+            model="qwen-max",
             messages=[
                 {"role": "system", "content": "你是一位专业的金融分析师。"},
                 {"role": "user", "content": prompt}
-            ]
+            ],
+            parameters={
+                "temperature": 0.1,  # 降低随机性，提高准确性
+                # 如果平台支持，可开启推理增强参数
+                # "enable_reasoning": True
+            }
         )
         return response.choices[0].message.content
     except Exception as e:
@@ -218,19 +215,20 @@ def send_email_to_all(content, receivers):
 
 # --- 主程序 ---
 if __name__ == "__main__":
-    # 配置 DeepSeek
-    api_key = os.getenv("AI_API_KEY")
-    base_url = os.getenv("AI_BASE_URL") or "https://api.deepseek.com"
+    # 配置 DashScope
+    api_key = os.getenv("DASHSCOPE_API_KEY")
+    base_url = os.getenv("AI_BASE_URL") or "https://dashscope.aliyuncs.com/compatible-mode/v1"
     
     if not api_key:
-        print("请设置 AI_API_KEY 环境变量。")
+        print("请设置 DASHSCOPE_API_KEY 环境变量。")
         exit(1)
 
     client = OpenAI(api_key=api_key, base_url=base_url)
 
     # 1. 获取数据
     market_info = get_market_data()
-    news_info = get_latest_news()
+    # 传入 client 供大模型调用
+    news_info = get_latest_news(client)
 
     # 2. AI 分析
     report = analyze_market(client, market_info, news_info)
