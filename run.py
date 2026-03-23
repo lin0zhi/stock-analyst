@@ -144,11 +144,9 @@ def analyze_market(client, market_data_str, news_str):
                 {"role": "system", "content": "你是一位专业的金融分析师。"},
                 {"role": "user", "content": prompt}
             ],
-            parameters={
-                "temperature": 0.1,  # 降低随机性，提高准确性
-                # 如果平台支持，可开启推理增强参数
-                # "enable_reasoning": True
-            }
+            temperature=0.1,  # 降低随机性，提高准确性
+            # parameters={...}  OpenAI SDK 不直接支持 parameters 字典，需拆分参数
+            # "enable_search": True # 如果需要搜索能力，可在这里添加 extra_body
         )
         return response.choices[0].message.content
     except Exception as e:
@@ -216,11 +214,12 @@ def send_email_to_all(content, receivers):
 # --- 主程序 ---
 if __name__ == "__main__":
     # 配置 DashScope
-    api_key = os.getenv("DASHSCOPE_API_KEY")
+    # 优先尝试 DASHSCOPE_API_KEY，如果不存在则使用 AI_API_KEY 以保持对 GitHub Actions 配置的兼容
+    api_key = os.getenv("DASHSCOPE_API_KEY") or os.getenv("AI_API_KEY")
     base_url = os.getenv("AI_BASE_URL") or "https://dashscope.aliyuncs.com/compatible-mode/v1"
     
     if not api_key:
-        print("请设置 DASHSCOPE_API_KEY 环境变量。")
+        print("请设置 DASHSCOPE_API_KEY 或 AI_API_KEY 环境变量。")
         exit(1)
 
     client = OpenAI(api_key=api_key, base_url=base_url)
