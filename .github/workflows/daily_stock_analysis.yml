@@ -1,0 +1,45 @@
+name: Daily Stock Analysis
+
+on:
+  schedule:
+    # 每天北京时间 07:30 (UTC 23:30 前一天) 运行
+    - cron: '30 23 * * *'
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  analyze-and-report:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # 如果未来需要写回文件
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Analyst Script
+        env:
+          # DeepSeek 配置
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+          AI_BASE_URL: ${{ secrets.AI_BASE_URL }}
+          
+          # 邮件配置
+          EMAIL_HOST: ${{ secrets.EMAIL_HOST }}
+          EMAIL_PORT: ${{ secrets.EMAIL_PORT }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+          EMAIL_RECEIVERS: ${{ secrets.EMAIL_RECEIVERS }}
+        
+        run: python run.py
